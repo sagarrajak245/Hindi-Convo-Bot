@@ -138,7 +138,7 @@ const App = () => {
             // Auto-play the AI response after adding it to conversation
             setTimeout(() => {
               autoPlayAudio(audioUrl, newConversation.length - 1);
-            }, 100); // Small delay to ensure the message is rendered
+            }, 200); // Small delay to ensure the message is rendered
 
             return newConversation;
           });
