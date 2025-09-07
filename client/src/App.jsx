@@ -92,12 +92,16 @@ const App = () => {
           }
 
           const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
+          console.log("Sending request to API:", apiUrl);
+          console.log("Using session ID:", sessionId);
           const response = await fetch(`${apiUrl}/api/chat`, {
             method: "POST",
             body: formData,
             headers: headers
           });
 
+          console.log("API response status:", response.status);
           if (!response.ok) {
             const err = await response.json();
             throw new Error(err.error || `Server error: ${response.statusText}`);

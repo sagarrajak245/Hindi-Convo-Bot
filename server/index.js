@@ -14,7 +14,7 @@ const port = process.env.PORT || 3001;
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 100,
   message: { error: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -22,10 +22,39 @@ const limiter = rateLimit({
 
 // Middleware
 app.use(express.json());
+
+// Updated CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true
+  origin: [
+    'https://hindi-convo-bot-frontend.onrender.com',
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ].filter(Boolean), // Remove any undefined values
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'x-session-id',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Authorization'
+  ]
 }));
+
+// Handle preflight requests - fix the wildcard pattern
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Origin', req.headers.origin);
+    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type,x-session-id,X-Requested-With,Accept,Origin,Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(limiter);
 
 // Setup for file uploads (audio) with validation
@@ -51,8 +80,16 @@ const upload = multer({
   }
 });
 
-// Initialize API Clients with error handling
+// Initialize API Clients with better error handling
 let genAI, elevenlabs, deepgram;
+
+// Add environment variable logging for debugging
+console.log('🔍 Environment check:');
+console.log('- GOOGLE_GEMINI_API_KEY:', process.env.GOOGLE_GEMINI_API_KEY ? 'Present' : 'Missing');
+console.log('- ELEVENLABS_API_KEY:', process.env.ELEVENLABS_API_KEY ? 'Present' : 'Missing');
+console.log('- DEEPGRAM_API_KEY:', process.env.DEEPGRAM_API_KEY ? 'Present' : 'Missing');
+console.log('- FRONTEND_URL:', process.env.FRONTEND_URL || 'Not set');
+console.log('- NODE_ENV:', process.env.NODE_ENV || 'development');
 
 try {
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
@@ -72,7 +109,11 @@ try {
   console.log('✅ All API clients initialized successfully');
 } catch (error) {
   console.error('❌ Failed to initialize API clients:', error.message);
-  process.exit(1);
+  console.error('💡 Make sure all API keys are set in your environment variables');
+  // Don't exit in production, just log the error
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
 }
 
 // Voice configurations for different languages/preferences
@@ -83,11 +124,9 @@ const VOICE_CONFIGS = {
 };
 
 function getVoiceId(preference) {
-  // If preference matches a key in VOICE_CONFIGS, use that
   if (VOICE_CONFIGS[preference]) {
     return VOICE_CONFIGS[preference];
   }
-  // Otherwise, assume it's already a voice ID
   return preference || VOICE_CONFIGS.multilingual;
 }
 
@@ -115,6 +154,11 @@ function getOrCreateChatSession(sessionId) {
   let session = chatSessions.get(sessionId);
 
   if (!session) {
+    // Check if genAI is available
+    if (!genAI) {
+      throw new Error('Gemini AI client not initialized. Check API keys.');
+    }
+
     const model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
       generationConfig: {
@@ -153,14 +197,28 @@ function getOrCreateChatSession(sessionId) {
   return session;
 }
 
-// Health check endpoint
+// Health check endpoint with better diagnostics
 app.get('/health', (req, res) => {
-  res.json({
+  const healthStatus = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     activeSessions: chatSessions.size,
-    uptime: process.uptime()
-  });
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    apis: {
+      gemini: !!genAI,
+      elevenlabs: !!elevenlabs,
+      deepgram: !!deepgram
+    }
+  };
+
+  // If any API client is missing, mark as unhealthy
+  if (!genAI || !elevenlabs || !deepgram) {
+    healthStatus.status = 'unhealthy';
+    healthStatus.error = 'Some API clients are not initialized';
+  }
+
+  res.json(healthStatus);
 });
 
 // Get session info endpoint
@@ -184,6 +242,14 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
   let sessionId = req.headers['x-session-id'] || req.body.sessionId;
 
   try {
+    // Check if all services are available
+    if (!genAI || !elevenlabs || !deepgram) {
+      return res.status(503).json({
+        error: "Service temporarily unavailable. API clients not initialized.",
+        code: "SERVICE_UNAVAILABLE"
+      });
+    }
+
     // Validate audio file
     if (!req.file) {
       return res.status(400).json({
@@ -214,7 +280,7 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
       return res.status(500).json({
         error: "Speech recognition failed",
         code: "STT_ERROR",
-        details: deepgramError.message
+        details: process.env.NODE_ENV === 'development' ? deepgramError.message : undefined
       });
     }
 
@@ -247,7 +313,7 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
 
     console.log(`✅ Gemini Response: "${geminiResponseText}"`);
 
-    // 4. Generate Audio with ElevenLabs (Text-to-Speech) using stream method
+    // 4. Generate Audio with ElevenLabs (Text-to-Speech)
     console.log('🔄 Converting text to speech...');
 
     const voiceId = getVoiceId(req.body.voicePreference);
@@ -292,6 +358,7 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error processing chat:", error);
+    console.error("Stack trace:", error.stack);
 
     // Handle specific error types
     let statusCode = 500;
@@ -313,6 +380,10 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
       statusCode = 401;
       errorResponse.error = "Authentication failed";
       errorResponse.code = "AUTH_ERROR";
+    } else if (error.message.includes('API clients not initialized')) {
+      statusCode = 503;
+      errorResponse.error = "Service starting up. Please try again in a moment.";
+      errorResponse.code = "SERVICE_STARTING";
     }
 
     if (process.env.NODE_ENV === 'development') {
@@ -385,4 +456,4 @@ app.listen(port, () => {
   console.log(`🎯 Chat API available at http://localhost:${port}/api/chat`);
 });
 
-export default app;  
+export default app; 
