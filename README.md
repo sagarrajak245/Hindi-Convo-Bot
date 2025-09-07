@@ -2,6 +2,7 @@
 
 A real-time voice chat application that allows users to have natural conversations with an AI assistant in Hindi. The application supports speech-to-text, AI response generation, and text-to-speech with multiple voice options.
 
+# Live Demo: [Hindi-Bot](https://hindi-convo-bot-frontend.onrender.com/)
 
 # Output:
 
