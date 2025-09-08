@@ -37,7 +37,8 @@ A real-time voice chat application that allows users to have natural conversatio
 ### AI Services
 - **Deepgram API** - Speech-to-text transcription
 - **Google Gemini AI** - Conversational AI responses
-- **ElevenLabs API** - Text-to-speech synthesis
+- **ElevenLabs API** - Text-to-speech synthesis (option 1)
+- **Google Gemini AI** - Text-to-speech synthesis (option2)
 
 ## 📋 Prerequisites
 
