@@ -1,6 +1,8 @@
 import { createClient } from '@deepgram/sdk';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import { GoogleGenAI } from '@google/genai'; // Added for TTS
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { Buffer } from 'buffer'; // Added for WAV conversion
 import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
@@ -81,7 +83,7 @@ const upload = multer({
 });
 
 // Initialize API Clients with better error handling
-let genAI, elevenlabs, deepgram;
+let genAI, genAITTS, elevenlabs, deepgram; // Added genAITTS
 
 // Add environment variable logging for debugging
 console.log('🔍 Environment check:');
@@ -103,6 +105,7 @@ try {
   }
 
   genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY);
+  genAITTS = new GoogleGenAI({ apiKey: process.env.GOOGLE_GEMINI_API_KEY }); // Added for TTS
   elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
   deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
@@ -120,7 +123,16 @@ try {
 const VOICE_CONFIGS = {
   hindi_male: "pNInz6obpgDQGcFmaJgB", // Adam
   hindi_female: "EXAVITQu4vr4xnSDxMaL", // Bella
-  multilingual: "pNInz6obpgDQGcFmaJgB" // Adam (good for Hindi)
+  multilingual: "pNInz6obpgDQGcFmaJgB", // Adam (good for Hindi)
+  // Added Gemini voices
+  Alnilam: "Alnilam",
+  Kore: "Kore"
+};
+
+// Added TTS providers configuration
+const TTS_PROVIDERS = {
+  elevenlabs: 'elevenlabs',
+  gemini: 'gemini'
 };
 
 function getVoiceId(preference) {
@@ -207,6 +219,7 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     apis: {
       gemini: !!genAI,
+      geminiTTS: !!genAITTS, // Added TTS check
       elevenlabs: !!elevenlabs,
       deepgram: !!deepgram
     }
@@ -236,10 +249,78 @@ app.get('/api/session/:sessionId', (req, res) => {
   }
 });
 
-// The main API endpoint for the chat
+// Added WAV conversion helper functions
+function convertToWav(rawData, mimeType) {
+  try {
+    const options = parseMimeType(mimeType);
+    const buffer = Buffer.from(rawData, 'base64');
+    const dataLength = buffer.length;
+    const wavHeader = createWavHeader(dataLength, options);
+    return Buffer.concat([wavHeader, buffer]);
+  } catch (error) {
+    console.error('❌ WAV conversion error:', error.message);
+    throw new Error('Failed to convert audio to WAV format');
+  }
+}
+
+function parseMimeType(mimeType) {
+  const [fileType, ...params] = mimeType.split(';').map(s => s.trim());
+  const [_, format] = fileType.split('/');
+
+  const options = {
+    numChannels: 1,
+    bitsPerSample: 16, // Default
+    sampleRate: 24000  // Default
+  };
+
+  if (format && format.startsWith('L')) {
+    const bits = parseInt(format.slice(1), 10);
+    if (!isNaN(bits)) {
+      options.bitsPerSample = bits;
+    }
+  }
+
+  for (const param of params) {
+    const [key, value] = param.split('=').map(s => s.trim());
+    if (key === 'rate') {
+      const rate = parseInt(value, 10);
+      if (!isNaN(rate)) options.sampleRate = rate;
+    }
+  }
+
+  return options;
+}
+
+function createWavHeader(dataLength, options) {
+  const { numChannels, sampleRate, bitsPerSample } = options;
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+
+  const buffer = Buffer.alloc(44);
+
+  // WAV header
+  buffer.write('RIFF', 0);                      // ChunkID
+  buffer.writeUInt32LE(36 + dataLength, 4);     // ChunkSize
+  buffer.write('WAVE', 8);                      // Format
+  buffer.write('fmt ', 12);                     // Subchunk1ID
+  buffer.writeUInt32LE(16, 16);                 // Subchunk1Size (PCM)
+  buffer.writeUInt16LE(1, 20);                  // AudioFormat (1 = PCM)
+  buffer.writeUInt16LE(numChannels, 22);        // NumChannels
+  buffer.writeUInt32LE(sampleRate, 24);         // SampleRate
+  buffer.writeUInt32LE(byteRate, 28);           // ByteRate
+  buffer.writeUInt16LE(blockAlign, 32);         // BlockAlign
+  buffer.writeUInt16LE(bitsPerSample, 34);      // BitsPerSample
+  buffer.write('data', 36);                     // Subchunk2ID
+  buffer.writeUInt32LE(dataLength, 40);         // Subchunk2Size
+
+  return buffer;
+}
+
+// The main API endpoint for the chat - UPDATED WITH GEMINI TTS
 app.post("/api/chat", upload.single("audio"), async (req, res) => {
   const startTime = Date.now();
   let sessionId = req.headers['x-session-id'] || req.body.sessionId;
+  const ttsProvider = req.body.ttsProvider || 'elevenlabs'; // Added TTS provider selection
 
   try {
     // Check if all services are available
@@ -312,9 +393,91 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
     }
 
     console.log(`✅ Gemini Response: "${geminiResponseText}"`);
+    console.log(`🔄 Using TTS Provider: ${ttsProvider}`);
 
-    // 4. Generate Audio with ElevenLabs (Text-to-Speech)
-    console.log('🔄 Converting text to speech...');
+    // 4. Generate Audio with selected TTS provider
+    res.setHeader("X-Session-Id", sessionId);
+    res.setHeader("X-Transcription", encodeURIComponent(transcribedText));
+    res.setHeader("X-Response-Text", encodeURIComponent(geminiResponseText));
+    res.setHeader("X-Processing-Time", Date.now() - startTime);
+
+    if (ttsProvider === 'gemini' && genAITTS) {
+      // Use Gemini TTS
+      try {
+        console.log('🤖 Using Gemini TTS...');
+
+        const config = {
+          temperature: 1,
+          responseModalities: ['audio'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: ['Alnilam', 'Kore'].includes(req.body.voicePreference) ? req.body.voicePreference : 'Kore',
+              }
+            }
+          },
+        };
+
+        const model = 'gemini-2.5-flash-preview-tts'; // Use more available model  
+        const contents = [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: geminiResponseText,
+              },
+            ],
+          },
+        ];
+
+        console.log('📡 Sending TTS request to Gemini...');
+
+        const responseStream = await genAITTS.models.generateContentStream({
+          model,
+          config,
+          contents,
+        });
+
+        let audioChunks = [];
+        let mimeType = '';
+
+        for await (const chunk of responseStream) {
+          if (!chunk.candidates || !chunk.candidates[0].content || !chunk.candidates[0].content.parts) {
+            continue;
+          }
+
+          if (chunk.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
+            const inlineData = chunk.candidates[0].content.parts[0].inlineData;
+            if (!mimeType) mimeType = inlineData.mimeType;
+            audioChunks.push(inlineData.data);
+          }
+        }
+
+        if (audioChunks.length === 0) {
+          throw new Error('No audio data received from Gemini TTS');
+        }
+
+        console.log(`🎵 Generated ${audioChunks.length} audio chunks with MIME type: ${mimeType}`);
+
+        const fullBase64 = audioChunks.join('');
+        const wavBuffer = convertToWav(fullBase64, mimeType || 'audio/L16;rate=24000');
+
+        res.setHeader("Content-Type", "audio/wav");
+        res.send(wavBuffer);
+
+        console.log(`✅ Gemini audio sent (Processing time: ${Date.now() - startTime}ms)`);
+        return;
+
+      } catch (geminiError) {
+        console.error('❌ Gemini TTS Error:', geminiError.message);
+        console.log('🔄 Falling back to ElevenLabs...');
+
+        // Fall through to ElevenLabs
+      }
+    }
+
+    // Use ElevenLabs TTS (default or fallback)
+    console.log('🔄 Converting text to speech with ElevenLabs...');
 
     const voiceId = getVoiceId(req.body.voicePreference);
     console.log(`🎤 Using voice ID: ${voiceId} for preference: ${req.body.voicePreference}`);
@@ -326,12 +489,8 @@ app.post("/api/chat", upload.single("audio"), async (req, res) => {
 
     // 5. Set response headers and send audio
     res.setHeader("Content-Type", "audio/mpeg");
-    res.setHeader("X-Session-Id", sessionId);
-    res.setHeader("X-Transcription", encodeURIComponent(transcribedText));
-    res.setHeader("X-Response-Text", encodeURIComponent(geminiResponseText));
-    res.setHeader("X-Processing-Time", Date.now() - startTime);
 
-    console.log(`✅ Sending audio response (Processing time: ${Date.now() - startTime}ms)`);
+    console.log(`✅ Sending ElevenLabs audio response (Processing time: ${Date.now() - startTime}ms)`);
 
     // Handle different types of stream responses
     if (audioStream && typeof audioStream.pipe === 'function') {
