@@ -6,7 +6,8 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState([]);
   const [sessionId, setSessionId] = useState(null);
-  const [voicePreference, setVoicePreference] = useState('multilingual');
+  const [ttsProvider, setTtsProvider] = useState('elevenlabs');
+  const [voicePreference, setVoicePreference] = useState('hindi_male');
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(null);
 
@@ -15,10 +16,25 @@ const App = () => {
   const conversationEndRef = useRef(null);
   const currentAudioRef = useRef(null);
 
-  const voiceOptions = {
-    multilingual: "एडम (बहुभाषी)",
+  // Updated voice options based on your backend
+  const elevenLabsVoices = {
     hindi_male: "एडम (हिंदी पुरुष)",
     hindi_female: "बेला (हिंदी महिला)"
+  };
+
+  const geminiVoices = {
+    Alnilam: "अल्निलम (जेमिनी)",
+    Kore: "कोर (जेमिनी)"
+  };
+
+  const ttsProviders = {
+    elevenlabs: "ElevenLabs (प्रीमियम)",
+    gemini: "Google Gemini (नेटिव)"
+  };
+
+  // Get current voice options based on selected provider
+  const getCurrentVoiceOptions = () => {
+    return ttsProvider === 'gemini' ? geminiVoices : elevenLabsVoices;
   };
 
   const scrollToBottom = () => {
@@ -28,6 +44,15 @@ const App = () => {
   useEffect(() => {
     scrollToBottom();
   }, [conversation]);
+
+  // Reset voice preference when provider changes
+  useEffect(() => {
+    if (ttsProvider === 'gemini') {
+      setVoicePreference('Kore'); // Default Gemini voice
+    } else {
+      setVoicePreference('hindi_male'); // Default ElevenLabs voice
+    }
+  }, [ttsProvider]);
 
   // Function to automatically play audio
   const autoPlayAudio = (audioUrl, messageIndex) => {
@@ -83,6 +108,7 @@ const App = () => {
 
         const formData = new FormData();
         formData.append("audio", audioBlob);
+        formData.append("ttsProvider", ttsProvider); // Send TTS provider
         formData.append("voicePreference", voicePreference);
 
         try {
@@ -95,6 +121,9 @@ const App = () => {
 
           console.log("Sending request to API:", apiUrl);
           console.log("Using session ID:", sessionId);
+          console.log("Using TTS provider:", ttsProvider);
+          console.log("Using voice:", voicePreference);
+
           const response = await fetch(`${apiUrl}/api/chat`, {
             method: "POST",
             body: formData,
@@ -134,7 +163,8 @@ const App = () => {
             role: 'ai',
             audioUrl,
             text: aiResponseText,
-            timestamp: new Date().toLocaleTimeString('hi-IN')
+            timestamp: new Date().toLocaleTimeString('hi-IN'),
+            ttsProvider // Store which TTS was used
           };
 
           setConversation(prev => {
@@ -229,28 +259,61 @@ const App = () => {
 
           {/* Settings Panel */}
           {showSettings && (
-            <div className="absolute top-16 right-4 bg-gray-800 rounded-lg p-4 shadow-xl border border-gray-600 z-10">
-              <div className="space-y-3">
+            <div className="absolute top-16 right-4 bg-gray-800 rounded-lg p-4 shadow-xl border border-gray-600 z-10 min-w-[250px]">
+              <div className="space-y-4">
+                {/* TTS Provider Selection */}
                 <div>
-                  <label className="block text-sm font-medium mb-1">आवाज़ चुनें:</label>
+                  <label className="block text-sm font-medium mb-2">TTS प्रोवाइडर चुनें:</label>
+                  <select
+                    value={ttsProvider}
+                    onChange={(e) => setTtsProvider(e.target.value)}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {Object.entries(ttsProviders).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {ttsProvider === 'gemini'
+                      ? 'तेज़ और नेटिव इंटीग्रेशन'
+                      : 'उच्च गुणवत्ता वाली आवाज़'}
+                  </p>
+                </div>
+
+                {/* Voice Selection */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">आवाज़ चुनें:</label>
                   <select
                     value={voicePreference}
                     onChange={(e) => setVoicePreference(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
-                    {Object.entries(voiceOptions).map(([key, label]) => (
+                    {Object.entries(getCurrentVoiceOptions()).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
                     ))}
                   </select>
                 </div>
+
+                {/* Current Settings Display */}
+                <div className="bg-gray-700/50 rounded p-3 text-xs">
+                  <div className="text-gray-300 mb-1">वर्तमान सेटिंग्स:</div>
+                  <div className="text-blue-300">
+                    Provider: {ttsProviders[ttsProvider]}
+                  </div>
+                  <div className="text-green-300">
+                    Voice: {getCurrentVoiceOptions()[voicePreference]}
+                  </div>
+                </div>
+
                 <button
                   onClick={clearConversation}
-                  className="w-full bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition-colors"
+                  className="w-full bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition-colors"
                 >
                   बातचीत साफ़ करें
                 </button>
+
                 {sessionId && (
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-400 text-center">
                     Session: {sessionId.slice(-8)}
                   </div>
                 )}
@@ -266,6 +329,10 @@ const App = () => {
               <FaRobot className="text-4xl mx-auto text-blue-400 mb-4" />
               <p>नमस्ते! मैं आपका AI दोस्त हूँ।</p>
               <p className="text-sm">बातचीत शुरू करने के लिए माइक्रोफ़ोन बटन दबाएँ।</p>
+              <div className="text-xs text-gray-500 mt-4 bg-gray-700/30 rounded-lg p-3">
+                <div>उपयोग में: {ttsProviders[ttsProvider]}</div>
+                <div>आवाज़: {getCurrentVoiceOptions()[voicePreference]}</div>
+              </div>
             </div>
           ) : (
             conversation.map((msg, index) => (
@@ -310,18 +377,27 @@ const App = () => {
                             {msg.text}
                           </p>
                         )}
-                        <button
-                          onClick={() => handlePlayAudio(msg.audioUrl, index)}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${isPlaying === index
-                            ? 'bg-green-600 hover:bg-green-700'
-                            : 'bg-blue-600 hover:bg-blue-700'
-                            }`}
-                        >
-                          <FaVolumeUp className={isPlaying === index ? 'animate-pulse' : ''} />
-                          <span className="text-sm">
-                            {isPlaying === index ? 'ऑडियो चल रहा है...' : 'फिर से सुनें'}
-                          </span>
-                        </button>
+                        <div className="flex items-center justify-between">
+                          <button
+                            onClick={() => handlePlayAudio(msg.audioUrl, index)}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${isPlaying === index
+                              ? 'bg-green-600 hover:bg-green-700'
+                              : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
+                          >
+                            <FaVolumeUp className={isPlaying === index ? 'animate-pulse' : ''} />
+                            <span className="text-sm">
+                              {isPlaying === index ? 'चल रहा है...' : 'सुनें'}
+                            </span>
+                          </button>
+
+                          {/* TTS Provider Badge */}
+                          {msg.ttsProvider && (
+                            <span className="text-xs bg-white/10 px-2 py-1 rounded">
+                              {msg.ttsProvider === 'gemini' ? '🤖 Gemini' : '🎙️ ElevenLabs'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -358,7 +434,9 @@ const App = () => {
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                   <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-                  <span className="text-sm ml-2">सोच रहा हूँ...</span>
+                  <span className="text-sm ml-2">
+                    {ttsProvider === 'gemini' ? 'Gemini से प्रतिक्रिया...' : 'ElevenLabs से आवाज़...'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -402,7 +480,12 @@ const App = () => {
             {isRecording ? (
               <span className="text-red-400 font-medium">🎙️ रिकॉर्डिंग... बोलना बंद करने के लिए क्लिक करें</span>
             ) : (
-              <span>🎯 बोलने के लिए तैयार</span>
+              <div className="space-y-1">
+                <span>🎯 बोलने के लिए तैयार</span>
+                <div className="text-xs">
+                  {ttsProvider === 'gemini' ? '🤖 Gemini TTS' : '🎙️ ElevenLabs'} • {getCurrentVoiceOptions()[voicePreference]}
+                </div>
+              </div>
             )}
           </div>
         </footer>
@@ -411,4 +494,4 @@ const App = () => {
   );
 };
 
-export default App; 
+export default App;
