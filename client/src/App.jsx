@@ -6,8 +6,8 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState([]);
   const [sessionId, setSessionId] = useState(null);
-  const [ttsProvider, setTtsProvider] = useState('elevenlabs');
-  const [voicePreference, setVoicePreference] = useState('hindi_male');
+  const [ttsProvider, setTtsProvider] = useState('gemini');
+  const [voicePreference, setVoicePreference] = useState('Kore');
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(null);
 
