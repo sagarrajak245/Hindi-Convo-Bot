@@ -320,7 +320,7 @@ function createWavHeader(dataLength, options) {
 app.post("/api/chat", upload.single("audio"), async (req, res) => {
   const startTime = Date.now();
   let sessionId = req.headers['x-session-id'] || req.body.sessionId;
-  const ttsProvider = req.body.ttsProvider || 'elevenlabs'; // Added TTS provider selection
+  const ttsProvider = req.body.ttsProvider || 'gemini'; // Added TTS provider selection
 
   try {
     // Check if all services are available
