@@ -8,6 +8,8 @@ A real-time voice chat application that allows users to have natural conversatio
 
 <img width="1122" height="780" alt="image" src="https://github.com/user-attachments/assets/5e663ee0-dd63-41ec-846c-0824030a2402" />
 
+<img width="1000" height="821" alt="image" src="https://github.com/user-attachments/assets/77555c66-6387-42e7-a2fa-5fe1e5622af7" />
+
 
 ## 🌟 Features
 
